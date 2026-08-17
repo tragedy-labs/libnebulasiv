@@ -1,0 +1,5 @@
+# libnebulasiv uses LLVM style: 2-space indent, 80-column limit, attached
+# braces, right-aligned pointers (neb_handle_t *h). Run `clang-format -i` on
+# changed files. clang-tidy is also available for static checks (e.g.
+# `clang-tidy src/neb_core.c -- -Iinclude`) but does not gate the build.
+BasedOnStyle: LLVM
