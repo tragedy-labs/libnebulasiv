@@ -1,0 +1,14 @@
+# Paths are resolved relative to this file's own location (${pcfiledir}) rather
+# than baked in at configure time, so the installed tree can be moved, staged,
+# or installed under a different --prefix than it was configured with.
+prefix=${pcfiledir}/@NEBULASIV_PC_RELATIVE_PREFIX@
+exec_prefix=${prefix}
+libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: nebulasiv
+Description: C library for configuring Unicore NebulasIV (N4) RTK GNSS receivers
+URL: https://github.com/tragedy-labs/libnebulasiv
+Version: @PROJECT_VERSION@
+Cflags: -I${includedir}
+Libs: -L${libdir} -lnebulasiv

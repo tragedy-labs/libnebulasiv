@@ -54,7 +54,8 @@ Implemented, per the *Unicore Reference Commands Manual for N4 (V2 R1.1)*:
 - **Signal masks** (§5) — elevation / PRN / frequency / C/N0
 - **Assisted GNSS input** (§6) — `AIDPOS` / `AIDTIME`
 - **Data output** (§7) — turning messages on/off (periodic / once / on-change),
-  with a typed enum for the standard NMEA messages
+  with a typed enum for the standard NMEA messages; `neb_read_raw()` reads the
+  resulting stream back
 - **Admin** (§8) — `UNLOG`, `RESET`, `FRESET`, `SAVECONFIG`
 
 Not yet implemented: parsing of output-message payloads into structs. Out of
@@ -68,6 +69,9 @@ Requires a C11 compiler.
 # Library
 cmake -S . -B build && cmake --build build
 
+# Install it (headers, static library, CMake package, pkg-config file)
+cmake --install build --prefix /usr/local
+
 # Unit tests — no hardware needed (vendored Unity, ASan/UBSan, -Werror)
 make test
 
@@ -76,6 +80,24 @@ make test
 NEB_TEST_PORT=/dev/ttyUSB0 NEB_TEST_BOARD="my board" make test-hardware
 NEB_TEST_LEVEL=read NEB_TEST_PORT=/dev/ttyUSB0 make test-hardware  # queries only
 ```
+
+### Using it from another project
+
+Installed, via CMake:
+
+```cmake
+find_package(nebulasiv 0.1 REQUIRED)
+target_link_libraries(your_target PRIVATE nebulasiv::nebulasiv)
+```
+
+Or via `pkg-config`, for a non-CMake build:
+
+```sh
+cc your.c $(pkg-config --cflags --libs nebulasiv)
+```
+
+Or vendored, without installing anything — `add_subdirectory()` the checkout and
+link the same `nebulasiv::nebulasiv` target, so both routes are interchangeable.
 
 ## Usage
 

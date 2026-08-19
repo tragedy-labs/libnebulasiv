@@ -6,8 +6,8 @@ header (e.g. `um980.h`) and gets exactly the commands that chip supports, while
 all command logic lives once per capability area — never duplicated per chip.
 
 > Status: build in progress, delivered as per-module batches.
-> - **`neb_mode`** (§3): complete — base (fixed / auto / id / self-optimize),
->   rover (default + profiles), heading2.
+> - **`neb_mode`** (§3): complete — base (fixed geodetic *and* ECEF / auto / id
+>   / self-optimize), rover (default + profiles), heading2.
 > - **`neb_config`** (§4): general commands largely done — query, PPS (§4.3),
 >   serial port (§4.2), undulation (§4.4), EVENT (§4.11), smooth (§4.12), MMP
 >   (§4.13), NMEA version (§4.14), RTCM B1C/B2a (§4.15), RTCMPHASERATE (§4.16),
@@ -192,12 +192,21 @@ No command logic changes — capability modules are shared.
 ## Build
 
 ```sh
-cmake -S . -B build && cmake --build build   # -> build/libnebulasiv.a
+cmake -S . -B build && cmake --build build     # -> build/libnebulasiv.a
+cmake --install build --prefix /usr/local      # headers, lib, package files
 ```
 
 `CMakeLists.txt` builds one target: a static `libnebulasiv.a` from the
 capability modules + transport. Applications live outside this repository —
 see the `nebulasiv_base_station` repo for a full RTK base station built on it.
+
+Installation exports a `nebulasiv::nebulasiv` target (`find_package(nebulasiv)`)
+plus a `pkg-config` file. Both locate their paths relative to where they are
+installed rather than where they were configured, so a staged or relocated tree
+still resolves. A consumer that vendors the source instead links the same
+aliased target, so the two routes are interchangeable; `NEBULASIV_INSTALL`
+defaults off when the project is pulled in via `add_subdirectory()`, so a
+consumer does not inherit our install rules.
 
 ## Testing
 
