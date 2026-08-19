@@ -94,14 +94,14 @@ static void test_nmea_message_str(void) {
 static void test_nmea_typed_wrappers(void) {
   mock_transport_t mock;
   mock_transport_init(&mock);
-  mock_transport_set_response_str(&mock, "$command,x,response: OK*00\r\n");
+  mock_transport_set_response_str(&mock, "$command,x,response: OK*26\r\n");
   neb_handle_t h = mock_handle(&mock, NEB_MODEL_UM980);
   TEST_ASSERT_EQUAL_INT(NEB_OK,
                         neb_logging_nmea_periodic(&h, NEB_NMEA_GPGGA, 1.0));
   TEST_ASSERT_EQUAL_STRING("GPGGA 1\r\n", mock_transport_written_str(&mock));
 
   mock_transport_init(&mock);
-  mock_transport_set_response_str(&mock, "$command,x,response: OK*00\r\n");
+  mock_transport_set_response_str(&mock, "$command,x,response: OK*26\r\n");
   neb_handle_t h2 = mock_handle(&mock, NEB_MODEL_UM982);
   TEST_ASSERT_EQUAL_INT(
       NEB_OK, neb_logging_nmea_onchanged_port(&h2, NEB_NMEA_GPGSVH, NEB_COM1));

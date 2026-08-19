@@ -22,7 +22,7 @@
 #include "tests.h"
 
 // A generic accepted ack; the parser ignores the ack checksum.
-#define OK_ACK "$command,x,response: OK*00\r\n"
+#define OK_ACK "$command,x,response: OK*26\r\n"
 
 // Run `callexpr` (which references handle `h`) on `model` and assert the status
 // and whether the transport was touched (1 = a write happened, 0 = none).
