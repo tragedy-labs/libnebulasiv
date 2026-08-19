@@ -8,18 +8,35 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <termios.h>
 #include <unistd.h>
 
 typedef struct {
   int fd;
+
+  // The port's line settings as found at open time. termios state belongs to
+  // the terminal device, not to our file descriptor, so a port left in raw
+  // mode stays that way for the next program to open it -- serial_close()
+  // puts these back. Zero `termios_saved` means there is nothing to restore.
+  struct termios saved_termios;
+  int termios_saved;
 } serial_t;
 
 // Open `device` at `baudrate` (8N1, raw). Returns 0 on success, -1 on error.
 // Supported baud rates: 9600, 19200, 38400, 57600, 115200, 230400, 460800,
 // 921600.
+//
+// The port is claimed exclusively, so a second process opening the same device
+// fails with EBUSY rather than quietly stealing bytes out of our stream. That
+// also means this call itself returns -1 with errno EBUSY if something else
+// already holds the port -- a serial terminal, a GCS, another instance of the
+// caller. (Exclusivity is advisory against root, which can still open.)
+//
+// The previous line settings are remembered and restored by serial_close().
 int serial_open(serial_t *serial, const char *device, int baudrate);
 
-// Close the port. Safe to call on an already-closed handle.
+// Close the port, restoring the line settings it had before serial_open().
+// Safe to call on an already-closed handle.
 void serial_close(serial_t *serial);
 
 // Blocking-until-data read. Returns bytes read, 0 if none were available, or
