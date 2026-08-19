@@ -197,8 +197,7 @@ cmake -S . -B build && cmake --build build   # -> build/libnebulasiv.a
 
 `CMakeLists.txt` builds one target: a static `libnebulasiv.a` from the
 capability modules + transport. Applications live outside this repository —
-see [nebulasiv_base_station](https://github.com/tragedy-labs/nebulasiv_base_station)
-for a full RTK base station built on it.
+see the `nebulasiv_base_station` repo for a full RTK base station built on it.
 
 ## Testing
 

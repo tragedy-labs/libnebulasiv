@@ -100,11 +100,10 @@ neb_close(&gps);
 ## RTK base station
 
 A ready-to-run base station built on this library lives in its own repository,
-[nebulasiv_base_station](https://github.com/tragedy-labs/nebulasiv_base_station):
-`neb_base` surveys in a receiver's position, turns on the RTCM3 correction
-messages a rover needs, and streams them out as MAVLink `GPS_RTCM_DATA` (#233)
-over UDP for QGroundControl / PX4 / ArduPilot. It is also the worked example of
-driving this library end to end.
+`nebulasiv_base_station`: `neb_base` surveys in a receiver's position, turns on
+the RTCM3 correction messages a rover needs, and streams them out as MAVLink
+`GPS_RTCM_DATA` (#233) over UDP for QGroundControl / PX4 / ArduPilot. It is also
+the worked example of driving this library end to end.
 
 ## Safety
 
