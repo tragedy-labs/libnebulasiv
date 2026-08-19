@@ -117,6 +117,34 @@ neb_status_t neb_build_mode_set_base_fixed(char *out, size_t len,
   return NEB_OK;
 }
 
+// Manual §3.2 -- Fixed Base Station, ECEF coordinates.
+//
+// Same command as the geodetic form; the receiver tells them apart by
+// magnitude alone (Manual §3.2, Table 3-4: an ECEF value is one that falls
+// OUTSIDE the corresponding geodetic range). A value inside that range would
+// be taken as latitude/longitude/altitude, so it is refused here rather than
+// sent to be misread.
+neb_status_t neb_build_mode_set_base_fixed_ecef(char *out, size_t len,
+                                                double x_m, double y_m,
+                                                double z_m) {
+  if (x_m >= -90.0 && x_m <= 90.0)
+    return NEB_ERR_INVALID_PARAM;
+  if (y_m >= -180.0 && y_m <= 180.0)
+    return NEB_ERR_INVALID_PARAM;
+  if (z_m >= -30000.0 && z_m <= 30000.0)
+    return NEB_ERR_INVALID_PARAM;
+
+  // "MODE BASE <x> <y> <z>". Fixed-point (never %g) so a coordinate can't
+  // render in scientific notation on the wire. The manual's example carries 4
+  // decimal places (MODE BASE -2160489.0276 4383620.1006 4084738.1110), which
+  // is 0.1 mm -- past what any of these receivers resolve.
+  int n = snprintf(out, len, "%s %s %.4f %.4f %.4f", NEB_CMD_MODE, NEB_TOK_BASE,
+                   x_m, y_m, z_m);
+  if (n < 0 || (size_t)n >= len)
+    return NEB_ERR_OVERFLOW;
+  return NEB_OK;
+}
+
 // Manual §3.7 -- Heading2 Mode
 neb_status_t neb_build_mode_set_heading2(char *out, size_t len,
                                          neb_heading2_mode_t mode) {
@@ -235,6 +263,20 @@ neb_status_t neb_mode_set_base_fixed(neb_handle_t *handle, double lat_deg,
   char cmd[NEB_CMD_BUF_LEN];
   neb_status_t st =
       neb_build_mode_set_base_fixed(cmd, sizeof(cmd), lat_deg, lon_deg, alt_m);
+  if (st != NEB_OK)
+    return st;
+
+  return neb_send_command(handle, cmd, NULL, 0);
+}
+
+neb_status_t neb_mode_set_base_fixed_ecef(neb_handle_t *handle, double x_m,
+                                          double y_m, double z_m) {
+  if (!neb_has_cap(handle, NEB_CAP_MODE))
+    return NEB_ERR_UNSUPPORTED;
+
+  char cmd[NEB_CMD_BUF_LEN];
+  neb_status_t st =
+      neb_build_mode_set_base_fixed_ecef(cmd, sizeof(cmd), x_m, y_m, z_m);
   if (st != NEB_OK)
     return st;
 

@@ -35,6 +35,9 @@ neb_status_t neb_build_mode_set_base_self_optimize_dist(char *out, size_t len,
 neb_status_t neb_build_mode_set_base_fixed(char *out, size_t len,
                                            double lat_deg, double lon_deg,
                                            double alt_m);
+neb_status_t neb_build_mode_set_base_fixed_ecef(char *out, size_t len,
+                                                double x_m, double y_m,
+                                                double z_m);
 neb_status_t neb_build_mode_set_heading2(char *out, size_t len,
                                          neb_heading2_mode_t mode);
 
@@ -88,10 +91,28 @@ neb_status_t neb_mode_set_base_self_optimize_dist(neb_handle_t *handle,
 // Put the receiver into fixed base-station mode with precise geodetic
 // coordinates (Manual §3.2). Bounds are validated before anything is sent:
 // -90..90 lat, -180..180 lon, -30000..30000 m altitude; out of range returns
-// NEB_ERR_INVALID_PARAM. (The ECEF coordinate form is a separate builder,
-// added later.)
+// NEB_ERR_INVALID_PARAM. For ECEF coordinates use the _ecef variant.
 neb_status_t neb_mode_set_base_fixed(neb_handle_t *handle, double lat_deg,
                                      double lon_deg, double alt_m);
+
+// Put the receiver into fixed base-station mode with precise ECEF coordinates
+// in metres (Manual §3.2).
+//
+// This is the same MODE BASE command as the geodetic form -- there is no ECEF
+// token. The receiver decides which coordinate system it was given purely by
+// magnitude: a triple counts as ECEF only when EVERY value falls outside the
+// geodetic range (x outside -90..90, y outside -180..180, z outside
+// -30000..30000). A value inside its geodetic range would be silently read as
+// a latitude, longitude or altitude, so it is rejected here with
+// NEB_ERR_INVALID_PARAM rather than sent and misinterpreted.
+//
+// One consequence of the receiver's rule, not of this library: a site whose
+// ECEF z is within 30 km of the equatorial plane (or whose x or y is near
+// zero, i.e. on the 0/90/180-degree meridians) cannot be expressed in ECEF at
+// all, because the value is indistinguishable from a geodetic one. Use the
+// geodetic form for those.
+neb_status_t neb_mode_set_base_fixed_ecef(neb_handle_t *handle, double x_m,
+                                          double y_m, double z_m);
 
 // Put the receiver into dual-receiver heading mode with the given baseline
 // model (Manual §3.7). Not available on the UM960L; returns

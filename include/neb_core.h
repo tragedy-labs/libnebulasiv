@@ -182,9 +182,35 @@ int neb_has_cap(const neb_handle_t *handle, neb_caps_t cap);
 // reply (acknowledgement plus any query payload lines that arrive) are copied
 // in and NUL-terminated; useful for query commands that return data.
 //
+// An acknowledgement whose "*hh" checksum does not match is treated as line
+// noise and skipped, not as a rejection -- a real ack arriving later in the
+// same read still counts.
+//
 // Every capability-module command wrapper must call through here and must not
 // touch the transport directly.
 neb_status_t neb_send_command(neb_handle_t *handle, const char *command,
                               char *response, size_t response_size);
+
+// ---------------------------------------------------------------------------
+// Raw stream reading.
+// ---------------------------------------------------------------------------
+// Read bytes straight off the transport, with no command framing and no
+// acknowledgement parsing. This is how you read a stream the receiver is
+// already producing -- RTCM3 corrections, NMEA, any Manual §7 output message --
+// after turning it on with the neb_logging commands.
+//
+// Waits up to `timeout_ms` for the first byte, then returns whatever has
+// arrived; a serial read yields the bytes present, not whole messages, so the
+// caller reassembles frames itself.
+//
+//   - at least one byte read     -> NEB_OK, *received > 0
+//   - nothing within the timeout -> NEB_ERR_TIMEOUT, *received == 0
+//   - transport failure          -> NEB_ERR_IO
+//
+// `received` may not be NULL. Do not interleave this with neb_send_command()
+// carelessly: bytes belonging to a command's acknowledgement can be swallowed
+// here, and vice versa.
+neb_status_t neb_read_raw(neb_handle_t *handle, uint8_t *buffer, size_t size,
+                          int timeout_ms, size_t *received);
 
 #endif

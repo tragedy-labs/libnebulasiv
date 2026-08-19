@@ -1,5 +1,5 @@
 # Fallback include paths for clangd. The CMake compile database only covers the
-# library and example, so the unit-test translation units aren't in it. clangd
+# library, so the unit-test translation units aren't in it. clangd
 # resolves these Add paths relative to the database entry's directory (build/),
 # so they are written relative to build/ (hence the ../). This lets test files
 # resolve unity.h / build_assert.h / tests.h / neb_*.h in-editor.

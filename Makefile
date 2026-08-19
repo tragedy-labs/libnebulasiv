@@ -1,8 +1,11 @@
 # Test Makefile for libnebulasiv.
 #
 #   make            / make test           -> unit tests only (CI-safe, no HW)
-#   make test-hardware                    -> integration tests, needs a real
-#                                            UM980 at $NEB_TEST_PORT (opt-in)
+#   make test-hardware                    -> integration tests against whatever
+#                                            receiver is at $NEB_TEST_PORT, and
+#                                            regenerate the hardware matrix
+#   make hardware-matrix                  -> regenerate the matrix only, from
+#                                            the recorded results (no hardware)
 #   make test-all                         -> both
 #   make clean
 #
@@ -12,7 +15,7 @@
 # with relaxed flags so third-party source can't break our build.
 
 CC      ?= cc
-INCLUDES := -Iinclude -Itests/unity -Itests/unit
+INCLUDES := -Iinclude -Itests/unity -Itests/unit -Itests/integration
 STRICT  := -std=gnu11 -Wall -Wextra -Wpedantic -Werror
 SAN     := -fsanitize=address,undefined -fno-omit-frame-pointer
 DBG     := -g -O1
@@ -51,10 +54,22 @@ UNIT_SRC := \
   tests/unit/test_bundle_um982.c \
   tests/unit/test_main.c
 
-HIL_SRC := tests/integration/test_hil_um980.c
-HIL_UM982_SRC := tests/integration/test_hil_um982.c
+# One hardware suite for every model. It identifies the attached receiver with
+# VERSIONA and decides per test what that model and firmware build should do,
+# rather than a separate file per chip -- see tests/integration/test_hil.c.
+HIL_SRC := \
+  tests/integration/hil_device.c \
+  tests/integration/test_hil.c
 
-.PHONY: test test-unit test-hardware test-hardware-um982 test-all clean
+RESULTS_DIR := tests/results
+MATRIX_DOC  := HARDWARE_TESTING.md
+MATRIX_AWK  := tools/gen_hardware_matrix.awk
+
+# Recorded automatically so a contributed run is attributable; override freely.
+NEB_TEST_CONTRIBUTOR ?= $(shell git config user.name 2>/dev/null)
+export NEB_TEST_CONTRIBUTOR
+
+.PHONY: test test-unit test-hardware hardware-matrix test-all clean
 
 test: test-unit
 
@@ -67,13 +82,19 @@ $(BUILD)/unit_tests: $(LIB_SRC) $(UNIT_SRC) tests/unity/unity.c
 	$(CC) $(STRICT) $(DBG) $(SAN) $(INCLUDES) $(LIB_SRC) $(UNIT_SRC) \
 	    $(BUILD)/unity.o -o $@
 
+# Runs against whatever is attached: the suite identifies the receiver and
+# adapts. RAM-only by default (never SAVECONFIG); NEB_TEST_LEVEL=read restricts
+# it to read-only queries. NEB_TEST_BOARD names the carrier board, which no
+# query can reveal.
 test-hardware: $(BUILD)/hil_tests
 	@if [ -z "$(NEB_TEST_PORT)" ]; then \
 	    echo "NEB_TEST_PORT is not set (e.g. NEB_TEST_PORT=/dev/ttyUSB0)."; \
 	    echo "Refusing to run hardware tests without an explicit port."; \
 	    exit 2; \
 	fi
+	@mkdir -p $(RESULTS_DIR)
 	$(BUILD)/hil_tests
+	@$(MAKE) --no-print-directory hardware-matrix
 
 $(BUILD)/hil_tests: $(LIB_SRC) $(HIL_SRC) tests/unity/unity.c
 	@mkdir -p $(BUILD)
@@ -81,21 +102,13 @@ $(BUILD)/hil_tests: $(LIB_SRC) $(HIL_SRC) tests/unity/unity.c
 	$(CC) $(STRICT) $(DBG) $(SAN) $(INCLUDES) $(LIB_SRC) $(HIL_SRC) \
 	    $(BUILD)/unity.o -o $@
 
-# UM982-only hardware verification (Holybro H-RTK Unicore UM982). RAM-only;
-# never persists. Needs a real UM982 at $NEB_TEST_PORT.
-test-hardware-um982: $(BUILD)/hil_um982
-	@if [ -z "$(NEB_TEST_PORT)" ]; then \
-	    echo "NEB_TEST_PORT is not set (e.g. NEB_TEST_PORT=/dev/ttyUSB0)."; \
-	    echo "Refusing to run hardware tests without an explicit port."; \
-	    exit 2; \
-	fi
-	$(BUILD)/hil_um982
-
-$(BUILD)/hil_um982: $(LIB_SRC) $(HIL_UM982_SRC) tests/unity/unity.c
-	@mkdir -p $(BUILD)
-	$(CC) $(DBG) $(SAN) -Itests/unity -c tests/unity/unity.c -o $(BUILD)/unity.o
-	$(CC) $(STRICT) $(DBG) $(SAN) $(INCLUDES) $(LIB_SRC) $(HIL_UM982_SRC) \
-	    $(BUILD)/unity.o -o $@
+# Rebuild the matrix in HARDWARE_TESTING.md from the recorded runs. Needs no
+# hardware -- the result files are the record; the table is only a view.
+hardware-matrix:
+	@files=$$(ls $(RESULTS_DIR)/*.tsv 2>/dev/null); \
+	awk -f $(MATRIX_AWK) $$files $(MATRIX_DOC) > $(MATRIX_DOC).tmp \
+	    && mv $(MATRIX_DOC).tmp $(MATRIX_DOC) \
+	    && echo "Regenerated the matrix in $(MATRIX_DOC)."
 
 test-all: test-unit test-hardware
 

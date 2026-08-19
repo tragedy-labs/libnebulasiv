@@ -32,7 +32,10 @@ what the device actually acknowledged.
   wrappers that gate, build, and send — so every wire string is unit-testable
   without a device.
 - **Pluggable transport.** A small vtable (`write`/`read`/`ctx`); a POSIX
-  `termios` serial backend is included, and tests drive a mock.
+  `termios` serial backend is included, and tests drive a mock. The serial
+  backend claims the port exclusively — a second opener gets `EBUSY` rather
+  than silently splitting the byte stream — and restores the port's previous
+  line settings on close.
 - **Injection-safe validation.** Free-text fields (message names, antenna
   names/serials) are validated against control-character / quote / token
   injection before being framed.
@@ -51,7 +54,8 @@ Implemented, per the *Unicore Reference Commands Manual for N4 (V2 R1.1)*:
 - **Signal masks** (§5) — elevation / PRN / frequency / C/N0
 - **Assisted GNSS input** (§6) — `AIDPOS` / `AIDTIME`
 - **Data output** (§7) — turning messages on/off (periodic / once / on-change),
-  with a typed enum for the standard NMEA messages
+  with a typed enum for the standard NMEA messages; `neb_read_raw()` reads the
+  resulting stream back
 - **Admin** (§8) — `UNLOG`, `RESET`, `FRESET`, `SAVECONFIG`
 
 Not yet implemented: parsing of output-message payloads into structs. Out of
@@ -65,13 +69,35 @@ Requires a C11 compiler.
 # Library
 cmake -S . -B build && cmake --build build
 
+# Install it (headers, static library, CMake package, pkg-config file)
+cmake --install build --prefix /usr/local
+
 # Unit tests — no hardware needed (vendored Unity, ASan/UBSan, -Werror)
 make test
 
-# Hardware-in-the-loop (opt-in; needs a real receiver at $NEB_TEST_PORT)
-NEB_TEST_PORT=/dev/ttyUSB0 make test-hardware         # UM980, read-only
-NEB_TEST_PORT=/dev/ttyUSB0 make test-hardware-um982   # UM982, RAM-only
+# Hardware-in-the-loop (opt-in; needs a real receiver at $NEB_TEST_PORT).
+# One suite for every model: it identifies the receiver and adapts.
+NEB_TEST_PORT=/dev/ttyUSB0 NEB_TEST_BOARD="my board" make test-hardware
+NEB_TEST_LEVEL=read NEB_TEST_PORT=/dev/ttyUSB0 make test-hardware  # queries only
 ```
+
+### Using it from another project
+
+Installed, via CMake:
+
+```cmake
+find_package(nebulasiv 0.1 REQUIRED)
+target_link_libraries(your_target PRIVATE nebulasiv::nebulasiv)
+```
+
+Or via `pkg-config`, for a non-CMake build:
+
+```sh
+cc your.c $(pkg-config --cflags --libs nebulasiv)
+```
+
+Or vendored, without installing anything — `add_subdirectory()` the checkout and
+link the same `nebulasiv::nebulasiv` target, so both routes are interchangeable.
 
 ## Usage
 
@@ -93,18 +119,32 @@ if (st != NEB_OK)
 neb_close(&gps);
 ```
 
+## RTK base station
+
+A ready-to-run base station built on this library lives in its own repository,
+`nebulasiv_base_station`: `neb_base` surveys in a receiver's position, turns on
+the RTCM3 correction messages a rover needs, and streams them out as MAVLink
+`GPS_RTCM_DATA` (#233) over UDP for QGroundControl / PX4 / ArduPilot. It is also
+the worked example of driving this library end to end.
+
 ## Safety
 
 The library **never sends `SAVECONFIG` or `FRESET` on your behalf.**
 Configuration changes are live-only (RAM) and revert on power-cycle unless you
-choose to persist them. The hardware test suites follow the same discipline —
+choose to persist them. The hardware test suite follows the same discipline —
 see [HARDWARE_TESTING.md](HARDWARE_TESTING.md).
 
 ## Hardware verification
 
-On-device results are tracked per model / integrator / firmware in
-[HARDWARE_TESTING.md](HARDWARE_TESTING.md). Contributions from other N4 boards —
-especially UM960 / UM960L, which the maintainer does not have — are welcome.
+On-device results are tracked per model / integrator / firmware build in
+[HARDWARE_TESTING.md](HARDWARE_TESTING.md). One suite covers every model: it
+identifies the attached receiver and adapts, recording each run to
+`tests/results/`, from which the matrix is generated (`make hardware-matrix`).
+A command the attached model does not support is verified as *refused* rather
+than skipped, so even a board with a small feature set produces a full row.
+
+Contributions from other N4 boards — especially UM960 / UM960L, which the
+maintainer does not have — are welcome.
 
 ## License
 

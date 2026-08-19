@@ -6,8 +6,8 @@ header (e.g. `um980.h`) and gets exactly the commands that chip supports, while
 all command logic lives once per capability area — never duplicated per chip.
 
 > Status: build in progress, delivered as per-module batches.
-> - **`neb_mode`** (§3): complete — base (fixed / auto / id / self-optimize),
->   rover (default + profiles), heading2.
+> - **`neb_mode`** (§3): complete — base (fixed geodetic *and* ECEF / auto / id
+>   / self-optimize), rover (default + profiles), heading2.
 > - **`neb_config`** (§4): general commands largely done — query, PPS (§4.3),
 >   serial port (§4.2), undulation (§4.4), EVENT (§4.11), smooth (§4.12), MMP
 >   (§4.13), NMEA version (§4.14), RTCM B1C/B2a (§4.15), RTCMPHASERATE (§4.16),
@@ -192,12 +192,21 @@ No command logic changes — capability modules are shared.
 ## Build
 
 ```sh
-cmake -S . -B build && cmake --build build
-./build/neb_example      # drives a receiver on /dev/ttyUSB0
+cmake -S . -B build && cmake --build build     # -> build/libnebulasiv.a
+cmake --install build --prefix /usr/local      # headers, lib, package files
 ```
 
-`CMakeLists.txt` builds a static `libnebulasiv.a` from the capability modules +
-transport, and the `neb_example` demo.
+`CMakeLists.txt` builds one target: a static `libnebulasiv.a` from the
+capability modules + transport. Applications live outside this repository —
+see the `nebulasiv_base_station` repo for a full RTK base station built on it.
+
+Installation exports a `nebulasiv::nebulasiv` target (`find_package(nebulasiv)`)
+plus a `pkg-config` file. Both locate their paths relative to where they are
+installed rather than where they were configured, so a staged or relocated tree
+still resolves. A consumer that vendors the source instead links the same
+aliased target, so the two routes are interchangeable; `NEBULASIV_INSTALL`
+defaults off when the project is pulled in via `add_subdirectory()`, so a
+consumer does not inherit our install rules.
 
 ## Testing
 
@@ -230,15 +239,25 @@ without it.
   - `mock_transport.c` — the hand-written fake `neb_transport_t`.
   - `fixtures/um980_session.h` — real bytes captured from an actual UM980,
     replayed as canned responses.
-- **`tests/integration/test_hil_um980.c`** — a conservative, read-only smoke
-  test against a real device. Only non-mutating queries; never `SAVECONFIG` or
-  `FRESET`. Expand only with commands confirmed non-mutating in the manual.
+- **`tests/integration/test_hil.c`** — one hardware suite for every model. It
+  identifies the attached receiver with `VERSIONA` and decides per test what
+  that model and firmware build should do, so a test has three meaningful
+  outcomes: accepted (or a pinned discrepancy), *unsupported* — the capability
+  gate refused it, which verifies `neb_caps_for_model()` against real silicon —
+  or skipped because the firmware build is below the documented minimum. Never
+  `SAVECONFIG` or `FRESET`; `NEB_TEST_LEVEL=read` restricts it to queries.
+- **`tests/integration/hil_device.c`** — identification and result recording.
+- **`tests/results/*.tsv`** — one file per (model, build, board), written by
+  each run. These are the record of what was verified on what; the matrix in
+  `HARDWARE_TESTING.md` is generated from them by
+  `tools/gen_hardware_matrix.awk` (`make hardware-matrix`) and is not edited by
+  hand.
 
-> On-device coverage is limited: development has access to a single UM980, so
-> other models (UM960/UM960L/UM982) and other firmware builds are **unverified
-> on silicon** — the library is written to the manual, but only unit-tested for
-> those. See **`HARDWARE_TESTING.md`** for the verification matrix and how to
-> contribute a hardware run (including different integrators of the same module).
+> On-device coverage is limited: models and firmware builds nobody has run the
+> suite against are **unverified on silicon** — the library is written to the
+> manual, but only unit-tested for those. See **`HARDWARE_TESTING.md`** for the
+> verification matrix and how to contribute a hardware run (including different
+> integrators of the same module).
 
 ### Manual-as-spec convention
 

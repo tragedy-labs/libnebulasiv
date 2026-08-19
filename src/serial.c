@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <stdint.h>
+#include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -36,6 +37,11 @@ int serial_open(serial_t *serial, const char *device, int baudrate) {
   if (!serial || !device)
     return -1;
 
+  // Leave the handle in the closed state on every failure path below, so a
+  // caller that unconditionally calls serial_close() does not act on garbage.
+  serial->fd = -1;
+  serial->termios_saved = 0;
+
   speed_t speed = baudrate_to_termios_speed(baudrate);
 
   if (speed == 0)
@@ -53,6 +59,24 @@ int serial_open(serial_t *serial, const char *device, int baudrate) {
     return -1;
   }
 
+  // Remember the settings before we rewrite them. These belong to the tty
+  // rather than to `fd`, so without restoring them on close the port would
+  // stay raw for whatever opens it next.
+  serial->saved_termios = tty;
+  serial->termios_saved = 1;
+
+  // Claim the port: further open() calls from other processes fail with EBUSY
+  // instead of interleaving their reads with ours. Two readers on one receiver
+  // is not a shared stream, it is each one silently losing half the bytes.
+  // Best effort -- not every tty driver implements TIOCEXCL, and it does not
+  // bind root.
+  (void)ioctl(fd, TIOCEXCL);
+
+  // Raw mode. The kernel's default line discipline is built for an interactive
+  // terminal: it rewrites CR/LF, eats 0x11/0x13 as flow control, turns 0x03
+  // into SIGINT, echoes input back out the port, and holds reads until a
+  // newline arrives. All of that corrupts a binary RTCM3 stream, so turn it
+  // off rather than work around it.
   cfmakeraw(&tty);
 
   cfsetispeed(&tty, speed);
@@ -85,9 +109,23 @@ void serial_close(serial_t *serial) {
     return;
 
   if (serial->fd >= 0) {
+    // Restore the line settings we found. TCSADRAIN so anything still queued
+    // goes out under the settings it was written for, rather than having the
+    // baud rate change mid-byte.
+    if (serial->termios_saved)
+      (void)tcsetattr(serial->fd, TCSADRAIN, &serial->saved_termios);
+
+    // Drop the exclusive claim explicitly. The kernel clears it when the tty
+    // itself is destroyed, but a tty can outlive our descriptor (a pty whose
+    // master is still open, a port another process also holds), and there the
+    // flag would survive our close and lock everyone out.
+    (void)ioctl(serial->fd, TIOCNXCL);
+
     close(serial->fd);
     serial->fd = -1;
   }
+
+  serial->termios_saved = 0;
 }
 
 ssize_t serial_read(serial_t *serial, uint8_t *buffer, size_t length) {

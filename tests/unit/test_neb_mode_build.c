@@ -117,6 +117,46 @@ static void test_mode_base_fixed(void) {
             NEB_ERR_INVALID_PARAM);
 }
 
+// Manual §3.2, Table 3-4 -- MODE BASE with ECEF coordinates. Same command as
+// the geodetic form; the receiver distinguishes them by magnitude alone, so
+// every value must fall OUTSIDE its geodetic range or it would be read as a
+// latitude/longitude/altitude.
+static void test_mode_base_fixed_ecef(void) {
+  // The manual's own example (Manual §3.2, Abbreviated ASCII Syntax).
+  BUILD_OK(neb_build_mode_set_base_fixed_ecef(buf, sizeof(buf), -2160489.0276,
+                                              4383620.1006, 4084738.1110),
+           "MODE BASE -2160489.0276 4383620.1006 4084738.1110");
+
+  char buf[NEB_CMD_BUF_LEN];
+
+  // Just outside each geodetic range is unambiguous, so it is accepted.
+  TEST_ASSERT_EQUAL_INT(NEB_OK, neb_build_mode_set_base_fixed_ecef(
+                                    buf, sizeof(buf), 90.0001, 180.0001,
+                                    30000.0001));
+  TEST_ASSERT_EQUAL_INT(NEB_OK, neb_build_mode_set_base_fixed_ecef(
+                                    buf, sizeof(buf), -90.0001, -180.0001,
+                                    -30000.0001));
+
+  // Anything inside a geodetic range is ambiguous on the wire and refused --
+  // including the boundary values themselves, which the geodetic form claims.
+  BUILD_ERR(neb_build_mode_set_base_fixed_ecef(buf, sizeof(buf), 90.0,
+                                               4383620.1006, 4084738.1110),
+            NEB_ERR_INVALID_PARAM);
+  BUILD_ERR(neb_build_mode_set_base_fixed_ecef(buf, sizeof(buf), -2160489.0276,
+                                               180.0, 4084738.1110),
+            NEB_ERR_INVALID_PARAM);
+  BUILD_ERR(neb_build_mode_set_base_fixed_ecef(buf, sizeof(buf), -2160489.0276,
+                                               4383620.1006, 30000.0),
+            NEB_ERR_INVALID_PARAM);
+
+  // A site near the equatorial plane cannot be expressed in ECEF at all: z is
+  // indistinguishable from an altitude. This is the receiver's rule, pinned
+  // here so the limitation stays visible.
+  BUILD_ERR(neb_build_mode_set_base_fixed_ecef(buf, sizeof(buf), -2160489.0276,
+                                               4383620.1006, 0.0),
+            NEB_ERR_INVALID_PARAM);
+}
+
 // Manual §3.7, Table 3-10 -- every heading2 baseline token, plus invalid enum
 static void test_mode_heading2(void) {
   BUILD_OK(
@@ -146,5 +186,6 @@ void run_mode_build_tests(void) {
   RUN_TEST(test_mode_base_self_optimize);
   RUN_TEST(test_mode_base_self_optimize_dist);
   RUN_TEST(test_mode_base_fixed);
+  RUN_TEST(test_mode_base_fixed_ecef);
   RUN_TEST(test_mode_heading2);
 }

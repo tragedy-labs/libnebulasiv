@@ -137,7 +137,7 @@ static void test_send_query_during_stream_terminates(void) {
   mock_transport_t mock;
   mock_transport_init(&mock);
   // Ack arrives, then the device keeps emitting periodic NMEA forever.
-  mock_transport_set_response_str(&mock, "$command,mode,response: OK*00\r\n");
+  mock_transport_set_response_str(&mock, "$command,mode,response: OK*5D\r\n");
   mock_transport_set_stream_str(
       &mock, "$GPGGA,000000.00,,,,,0,00,99.99,,,,,,*48\r\n");
   neb_handle_t h = mock_handle(&mock, NEB_MODEL_UM980);
@@ -184,6 +184,141 @@ static void test_send_invalid_handle(void) {
   TEST_ASSERT_EQUAL_INT(0, mock.write_calls); // nothing was sent
 }
 
+// --- Acknowledgement checksum ---------------------------------------------
+// "*hh" is the XOR of every character from the leading '$' through the
+// character before the '*', including the '$'. Undocumented in the manual;
+// confirmed against captured device bytes (see fixtures/um980_session.h).
+
+// A correct checksum is accepted -- the value here is the one a real UM980
+// returned for this exact line.
+static void test_send_ack_checksum_valid(void) {
+  mock_transport_t mock;
+  mock_transport_init(&mock);
+  mock_transport_set_response_str(&mock, "$command,MODE,response: OK*5D\r\n");
+  neb_handle_t h = mock_handle(&mock, NEB_MODEL_UM980);
+  TEST_ASSERT_EQUAL_INT(NEB_OK, neb_send_command(&h, "MODE", NULL, 0));
+}
+
+// A corrupted checksum is line noise, not a rejection: the line is skipped and
+// the scan continues, so a good ack arriving afterwards still counts.
+static void test_send_ack_checksum_corrupt_is_skipped(void) {
+  mock_transport_t mock;
+  mock_transport_init(&mock);
+  mock_transport_set_response_str(&mock, "$command,MODE,response: OK*FF\r\n");
+  neb_handle_t h = mock_handle(&mock, NEB_MODEL_UM980);
+  TEST_ASSERT_EQUAL_INT(NEB_ERR_TIMEOUT, neb_send_command(&h, "MODE", NULL, 0));
+
+  // Same corrupt line, then a good one: the good one wins.
+  mock_transport_init(&mock);
+  mock_transport_set_response_str(&mock, "$command,MODE,response: OK*FF\r\n"
+                                         "$command,MODE,response: OK*5D\r\n");
+  neb_handle_t h2 = mock_handle(&mock, NEB_MODEL_UM980);
+  TEST_ASSERT_EQUAL_INT(NEB_OK, neb_send_command(&h2, "MODE", NULL, 0));
+}
+
+// A corrupt checksum must not turn a rejection into a success or vice versa:
+// a NAK line with a valid checksum is still a NAK.
+static void test_send_ack_checksum_valid_nak(void) {
+  mock_transport_t mock;
+  mock_transport_init(&mock);
+  // Captured verbatim from a real UM980 (fixtures/um980_session.h).
+  mock_transport_set_response_str(
+      &mock,
+      "$command,config com9 115200,response: PARSING FAILED MISSING FIELD,*56"
+      "\r\n");
+  neb_handle_t h = mock_handle(&mock, NEB_MODEL_UM980);
+  TEST_ASSERT_EQUAL_INT(NEB_ERR_NAK,
+                        neb_send_command(&h, "config com9 115200", NULL, 0));
+}
+
+// A reply carrying no "*" field at all is still accepted: not every reply form
+// is known to include a checksum, and refusing a well-formed acknowledgement
+// over a missing one would be the worse failure.
+static void test_send_ack_without_checksum_accepted(void) {
+  mock_transport_t mock;
+  mock_transport_init(&mock);
+  mock_transport_set_response_str(&mock, "$command,MODE,response: OK\r\n");
+  neb_handle_t h = mock_handle(&mock, NEB_MODEL_UM980);
+  TEST_ASSERT_EQUAL_INT(NEB_OK, neb_send_command(&h, "MODE", NULL, 0));
+}
+
+// --- neb_read_raw ----------------------------------------------------------
+// Raw stream reading: no framing, no ack parsing. Used for the output messages
+// the receiver produces once logging is turned on (RTCM3, NMEA, §7 logs).
+
+static void test_read_raw_returns_bytes(void) {
+  // An RTCM3 frame header and payload: binary, with embedded NUL bytes. Set
+  // with an explicit length, not as a C string -- a strlen-based helper would
+  // stop at the first NUL and quietly test almost nothing, and surviving NULs
+  // is the whole reason this entry point exists.
+  static const uint8_t frame[] = {0xd3, 0x00, 0x13, 0x3e, 0x00, 0x00, 0x7f};
+  mock_transport_t mock;
+  mock_transport_init(&mock);
+  mock_transport_set_response(&mock, frame, sizeof(frame));
+  neb_handle_t h = mock_handle(&mock, NEB_MODEL_UM980);
+
+  uint8_t buffer[64];
+  size_t received = 0;
+  TEST_ASSERT_EQUAL_INT(NEB_OK,
+                        neb_read_raw(&h, buffer, sizeof(buffer), 10, &received));
+  TEST_ASSERT_EQUAL_UINT(sizeof(frame), received);
+  // Handed through byte for byte: no framing, no NUL truncation, no rewriting.
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(frame, buffer, sizeof(frame));
+}
+
+// A quiet port is a timeout, not an error -- a streaming loop treats it as
+// "nothing yet" and goes round again.
+static void test_read_raw_quiet_port_times_out(void) {
+  mock_transport_t mock;
+  mock_transport_init(&mock);
+  neb_handle_t h = mock_handle(&mock, NEB_MODEL_UM980);
+
+  uint8_t buffer[64];
+  size_t received = 99;
+  TEST_ASSERT_EQUAL_INT(NEB_ERR_TIMEOUT,
+                        neb_read_raw(&h, buffer, sizeof(buffer), 10, &received));
+  TEST_ASSERT_EQUAL_UINT(0, received);
+}
+
+static void test_read_raw_transport_failure(void) {
+  mock_transport_t mock;
+  mock_transport_init(&mock);
+  mock.fail_read = 1;
+  neb_handle_t h = mock_handle(&mock, NEB_MODEL_UM980);
+
+  uint8_t buffer[64];
+  size_t received = 99;
+  TEST_ASSERT_EQUAL_INT(NEB_ERR_IO,
+                        neb_read_raw(&h, buffer, sizeof(buffer), 10, &received));
+  TEST_ASSERT_EQUAL_UINT(0, received);
+}
+
+static void test_read_raw_rejects_bad_arguments(void) {
+  mock_transport_t mock;
+  mock_transport_init(&mock);
+  mock_transport_set_response_str(&mock, "bytes");
+  neb_handle_t h = mock_handle(&mock, NEB_MODEL_UM980);
+
+  uint8_t buffer[64];
+  size_t received = 0;
+  TEST_ASSERT_EQUAL_INT(NEB_ERR_INVALID_PARAM,
+                        neb_read_raw(&h, NULL, sizeof(buffer), 10, &received));
+  TEST_ASSERT_EQUAL_INT(NEB_ERR_INVALID_PARAM,
+                        neb_read_raw(&h, buffer, 0, 10, &received));
+  TEST_ASSERT_EQUAL_INT(NEB_ERR_INVALID_PARAM,
+                        neb_read_raw(&h, buffer, sizeof(buffer), 10, NULL));
+
+  neb_handle_t closed = mock_handle(&mock, NEB_MODEL_UM980);
+  closed.is_open = 0;
+  TEST_ASSERT_EQUAL_INT(
+      NEB_ERR_INVALID_HANDLE,
+      neb_read_raw(&closed, buffer, sizeof(buffer), 10, &received));
+  TEST_ASSERT_EQUAL_INT(
+      NEB_ERR_INVALID_HANDLE,
+      neb_read_raw(NULL, buffer, sizeof(buffer), 10, &received));
+  TEST_ASSERT_EQUAL_INT(0, mock.read_calls); // nothing reached the transport
+}
+
 void run_send_command_tests(void) {
   RUN_TEST(test_send_writes_framing);
   RUN_TEST(test_send_ok_captures_payload);
@@ -199,4 +334,12 @@ void run_send_command_tests(void) {
   RUN_TEST(test_send_write_failure);
   RUN_TEST(test_send_read_failure);
   RUN_TEST(test_send_invalid_handle);
+  RUN_TEST(test_send_ack_checksum_valid);
+  RUN_TEST(test_send_ack_checksum_corrupt_is_skipped);
+  RUN_TEST(test_send_ack_checksum_valid_nak);
+  RUN_TEST(test_send_ack_without_checksum_accepted);
+  RUN_TEST(test_read_raw_returns_bytes);
+  RUN_TEST(test_read_raw_quiet_port_times_out);
+  RUN_TEST(test_read_raw_transport_failure);
+  RUN_TEST(test_read_raw_rejects_bad_arguments);
 }

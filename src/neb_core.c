@@ -143,6 +143,44 @@ static void resp_append(char *dst, size_t cap, size_t *used, const char *src,
   dst[*used] = '\0';
 }
 
+// Value of one hex digit, or -1 if it is not one.
+static int hex_value(char c) {
+  if (c >= '0' && c <= '9')
+    return c - '0';
+  if (c >= 'a' && c <= 'f')
+    return c - 'a' + 10;
+  if (c >= 'A' && c <= 'F')
+    return c - 'A' + 10;
+  return -1;
+}
+
+// Verify the "*hh" checksum an acknowledgement carries: the XOR of every
+// character from the leading '$' through the character before the '*',
+// INCLUDING the '$' itself. (Confirmed against captured device bytes -- the
+// manual documents neither the acknowledgement nor its checksum.)
+//
+// Returns 1 when the checksum matches, and also when the line carries no "*"
+// at all: not every reply form is known to include one, and refusing an
+// otherwise well-formed acknowledgement over a missing checksum would be a
+// worse failure than accepting it. Returns 0 only when a checksum is present
+// and disagrees.
+static int ack_checksum_ok(const char *ack) {
+  const char *star = strrchr(ack, '*');
+  if (!star)
+    return 1;
+
+  int high = hex_value(star[1]);
+  int low = star[1] ? hex_value(star[2]) : -1;
+  if (high < 0 || low < 0)
+    return 1; // not a checksum field; nothing to disagree with
+
+  uint8_t checksum = 0;
+  for (const char *p = ack; p < star; p++)
+    checksum ^= (uint8_t)*p;
+
+  return checksum == (uint8_t)((high << 4) | low);
+}
+
 neb_status_t neb_send_command(neb_handle_t *handle, const char *command,
                               char *response, size_t response_size) {
   if (!handle || !handle->is_open || !handle->transport.write ||
@@ -196,6 +234,8 @@ neb_status_t neb_send_command(neb_handle_t *handle, const char *command,
         line[line_len] = '\0';
 
         char *match = strstr(line, NEB_RESP_PREFIX);
+        if (match && !ack_checksum_ok(match))
+          match = NULL; // corrupted line; keep scanning for a good ack
         if (match) {
           // Classify: an explicit "response: OK" is the only success form;
           // any other acknowledgement (PARSING FAILED, ...) is a rejection.
@@ -253,4 +293,25 @@ neb_status_t neb_send_command(neb_handle_t *handle, const char *command,
   }
 
   return result;
+}
+
+neb_status_t neb_read_raw(neb_handle_t *handle, uint8_t *buffer, size_t size,
+                          int timeout_ms, size_t *received) {
+  if (received)
+    *received = 0;
+
+  if (!handle || !handle->is_open)
+    return NEB_ERR_INVALID_HANDLE;
+  if (!buffer || size == 0 || !received)
+    return NEB_ERR_INVALID_PARAM;
+
+  const int r =
+      handle->transport.read(handle->transport.ctx, buffer, size, timeout_ms);
+  if (r < 0)
+    return NEB_ERR_IO;
+  if (r == 0)
+    return NEB_ERR_TIMEOUT;
+
+  *received = (size_t)r;
+  return NEB_OK;
 }
