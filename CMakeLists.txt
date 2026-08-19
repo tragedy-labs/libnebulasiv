@@ -25,7 +25,3 @@ add_library(nebulasiv STATIC
   src/neb_logging.c
 )
 target_include_directories(nebulasiv PUBLIC include)
-
-# Minimal example.
-add_executable(neb_example src/main.c)
-target_link_libraries(neb_example PRIVATE nebulasiv)
